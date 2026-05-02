@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-a: #f7fafc;
+  --bg-b: #e5ecf7;
+  --text: #0f172a;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: var(--text);
+  background:
+    radial-gradient(circle at 20% 0%, rgba(11, 95, 255, 0.18), transparent 36%),
+    radial-gradient(circle at 80% 0%, rgba(24, 169, 87, 0.14), transparent 32%),
+    linear-gradient(180deg, var(--bg-a), var(--bg-b));
+}

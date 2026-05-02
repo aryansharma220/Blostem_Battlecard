@@ -1,0 +1,93 @@
+Requirement Sheet — Competitive Intelligence & Battlecard Generator
+Objective
+
+Build a working prototype that takes a named fintech/BFSI competitor as input and returns a 1-page battlecard in Markdown or PDF with source citations, in under 60 seconds. The product must look credible enough to demo to founders and sales teams as a real GTM intelligence tool.
+
+Primary user
+
+A Blostem AE / sales rep who needs fast competitor intelligence before a call, pitch, or objection-handling conversation.
+
+Core problem
+
+Sales teams lose leads because they do not have:
+
+current competitor positioning,
+pricing posture,
+recent launches,
+customer sentiment,
+and clean, usable objection-handling notes in one place.
+Product outcome
+
+A single input field for competitor name.
+The system generates:
+
+Positioning summary
+Pricing posture
+Recent launches / news
+Strengths / weaknesses
+Customer sentiment
+Talk track / battle points
+Citations for every factual claim
+Exportable 1-page Markdown/PDF battlecard
+Functional requirements
+Competitor input
+User enters a company name like “Razorpay” or “Cashfree”.
+System normalizes the name and identifies official domain + relevant aliases.
+Data collection
+Crawl official website, pricing pages, product pages, docs, blogs, press releases.
+Pull recent news and launch announcements.
+Pull customer sentiment from public sources such as reviews, app stores, and public discussion.
+Store raw source snippets with URLs and timestamps.
+Intelligence extraction
+Detect:
+positioning language,
+pricing posture,
+key products/features,
+recent launches,
+customer pain points,
+recurring positive/negative sentiment.
+Rank sources by recency and authority.
+Battlecard generation
+Generate a concise one-page output.
+Include:
+“What they sell”
+“How they position”
+“Pricing posture”
+“Recent moves”
+“How to beat them”
+“Watch-outs”
+Every factual claim must have a citation.
+Export
+Download as Markdown and PDF.
+Generate polished formatting suitable for a founder demo.
+Performance
+End-to-end generation must complete in under 60 seconds for a normal competitor.
+Show progress states: searching, crawling, extracting, generating, exporting.
+Non-functional requirements
+Reliable citations, not hallucinated summaries.
+Clean UX, fast loading, obvious “product” feel.
+Resilient when a source is unavailable.
+Log every run.
+Cache results for repeated competitors.
+Suggested architecture
+Frontend: Next.js 15 + TypeScript + Tailwind + shadcn/ui
+Backend: Python FastAPI or Node.js API layer
+Scraping: Playwright + Requests/BeautifulSoup
+Search: Tavily / SerpAPI / Bing Web Search / Google News API, depending on available keys
+Storage: SQLite/Postgres for metadata + object storage for raw HTML/text
+RAG layer: vector store with chunked source snippets
+LLM: groq API with structured output
+Export: Markdown renderer + PDF generation
+Demo flow
+User opens app.
+Enters competitor name.
+Sees live progress.
+Receives a polished battlecard.
+Downloads PDF.
+Demo highlights citations and speed.
+Success criteria
+Generates battlecard for at least 3 fintech competitors.
+Includes real citations.
+Produces usable, sales-style output.
+Looks polished in a demo.
+Works end-to-end without manual editing.

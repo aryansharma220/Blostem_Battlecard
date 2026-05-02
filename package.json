@@ -1,0 +1,24 @@
+{
+  "name": "battlecard-generator-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/shared",
+    "packages/scraper",
+    "packages/prompts",
+    "packages/utils"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace apps/web",
+    "build:web": "npm run build --workspace apps/web",
+    "lint:web": "npm run lint --workspace apps/web",
+    "typecheck:web": "npm run typecheck --workspace apps/web",
+    "dev:api": "cd apps/api && uvicorn main:app --reload --host 0.0.0.0 --port 8000",
+    "install:all": "npm install --workspaces",
+    "dev": "npm run dev:web"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
