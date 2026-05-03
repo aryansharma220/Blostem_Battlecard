@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     dedupe_limit: int = 60
     post_max_bullets: int = 5
     post_max_words_per_bullet: int = 500
+    # Minimum number of ranked sources required for confident generation
+    min_sources: int = 5
 
     groq_api_key: str = ""
     groq_model: str = ""

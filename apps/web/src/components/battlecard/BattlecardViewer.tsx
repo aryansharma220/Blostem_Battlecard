@@ -4,10 +4,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BattlecardCards } from "./BattlecardCards";
 
-export function BattlecardViewer({ markdown, payload, events }: { markdown?: string | null; payload?: any; events?: any[] }) {
+export function BattlecardViewer({ markdown, payload, events, mode }: { markdown?: string | null; payload?: any; events?: any[]; mode?: "live" | "deep" }) {
   // Prefer structured payload when available
   if (payload) {
-    return <BattlecardCards payload={payload} events={events} />;
+    return <BattlecardCards payload={payload} events={events} initialMode={mode ?? (payload?.summary?.mode === "deep" ? "deep" : "live")} />;
   }
 
   return (

@@ -2,6 +2,8 @@ import type { BattlecardRun, GenerateResponse } from "@/types/battlecard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
+export type BattlecardMode = "live" | "deep";
+
 export interface RecentRun {
   id: string;
   competitor_name: string;
@@ -10,11 +12,11 @@ export interface RecentRun {
   updated_at: string;
 }
 
-export async function generateBattlecard(competitorName: string): Promise<GenerateResponse> {
+export async function generateBattlecard(competitorName: string, mode: BattlecardMode = "live"): Promise<GenerateResponse> {
   const res = await fetch(`${API_BASE}/api/battlecard/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ competitor_name: competitorName }),
+    body: JSON.stringify({ competitor_name: competitorName, mode }),
   });
   if (!res.ok) {
     throw new Error("Failed to start generation");

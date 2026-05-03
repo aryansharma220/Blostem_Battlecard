@@ -52,8 +52,17 @@ def extract_snippets(ranked_sources: list[dict[str, Any]]) -> list[dict[str, Any
                 {
                     "id": f"SN{snippet_id}",
                     "text": line[:300],
+                    "source_id": source.get("id"),
                     "source_url": source["url"],
                     "source_title": source["title"],
+                    "citations": [
+                        {
+                            "source_id": source.get("id"),
+                            "url": source.get("url"),
+                            "published_at": source.get("published_at"),
+                            "score": float(source.get("score", 0.0)),
+                        }
+                    ],
                     "sections": matched_sections,
                 }
             )
@@ -76,8 +85,15 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
     def token_key(s: str) -> set[str]:
         return {token for token in re.findall(r"[a-z0-9]+", s.lower()) if len(token) > 3}
 
+    def snippet_citations(sn: dict[str, Any]) -> list[Any]:
+        citations = sn.get("citations") or []
+        if citations:
+            return list(citations)
+        source_url = sn.get("source_url")
+        return [source_url] if source_url else []
+
     unique: list[dict[str, Any]] = []
-    seen_texts: set[str] = set()
+    seen_texts: dict[str, dict[str, Any]] = {}
 
     for sn in snippets:
         text = (sn.get("text") or "").strip()
@@ -85,6 +101,18 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
             continue
         norm = normalize(text)
         if norm in seen_texts:
+            merged = seen_texts[norm]
+            existing_cits = merged.get("citations", []) or []
+            new_cits = snippet_citations(sn)
+            seen_keys = {_citation_key(c) for c in existing_cits}
+            for c in new_cits:
+                key = _citation_key(c)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                existing_cits.append(c)
+            merged["citations"] = existing_cits
+            merged["sections"] = list(set((merged.get("sections", []) or []) + (sn.get("sections", []) or [])))
             continue
 
         merged = None
@@ -109,19 +137,29 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
 
         if merged is None:
             # ensure citations and sections are lists
-            sn.setdefault("citations", [sn.get("source_url")])
+            sn.setdefault("citations", sn.get("citations") or ([sn.get("source_url")] if sn.get("source_url") else []))
             sn.setdefault("sections", sn.get("sections", []))
             sn_copy = sn.copy()
             sn_copy["_dedupe_tokens"] = norm_tokens
             unique.append(sn_copy)
-            seen_texts.add(norm)
+            seen_texts[norm] = sn_copy
         else:
             # merge into existing: prefer longer text, combine citations and sections
             if len(text) > len(merged["text"]):
                 merged["text"] = text
             # combine citations
-            merged_cits = set(merged.get("citations", []) + [sn.get("source_url")])
-            merged["citations"] = list(merged_cits)
+            # dedupe citations by (source_id or url) while preserving original item shape
+            existing_cits = merged.get("citations", []) or []
+            new_cits = snippet_citations(sn)
+            seen_keys = {_citation_key(c) for c in existing_cits}
+            merged_list = list(existing_cits)
+            for c in new_cits:
+                key = _citation_key(c)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged_list.append(c)
+            merged["citations"] = merged_list
             # combine sections
             merged_sections = set(merged.get("sections", []) + sn.get("sections", []))
             merged["sections"] = list(merged_sections)
@@ -140,7 +178,30 @@ def _first_signal_text(signal: dict[str, Any]) -> str:
 
 
 def _citations(signal: dict[str, Any]) -> list[str]:
-    return [str(url) for url in signal.get("citations", []) if url]
+    out: list[dict[str, Any]] = []
+    for c in signal.get("citations", []) or []:
+        if isinstance(c, dict):
+            out.append(
+                {
+                    "source_id": c.get("source_id") or c.get("id"),
+                    "url": c.get("url"),
+                    "published_at": c.get("published_at"),
+                    "score": c.get("score"),
+                }
+            )
+        else:
+            s = str(c)
+            if s.startswith("http"):
+                out.append({"url": s})
+            else:
+                out.append({"source_id": s})
+    return out
+
+
+def _citation_key(citation: Any) -> str:
+    if isinstance(citation, dict):
+        return str(citation.get("source_id") or citation.get("url") or citation.get("id") or "")
+    return str(citation)
 
 
 def _fallback_json(
@@ -159,13 +220,11 @@ def _fallback_json(
         picks = grouped.get(section, [])[:8]
         if not picks:
             return [{"claim": "Not enough public data found.", "citations": []}]
-        return [
-            {
-                "claim": p["text"],
-                "citations": [p["source_url"]],
-            }
-            for p in picks
-        ]
+        out = []
+        for p in picks:
+            cits = p.get("citations") or ([{"url": p.get("source_url")}])
+            out.append({"claim": p.get("text", ""), "citations": cits})
+        return out
 
     sections = {section: build_bullets(section) for section in SECTIONS}
     weak_signals = [s for s in signals if s.get("angle") == "weakness"]
@@ -184,7 +243,16 @@ def _fallback_json(
     return {
         "competitor_name": competitor_name,
         "sections": sections,
-        "sources": [{"url": s["url"], "title": s["title"]} for s in sources],
+        "sources": [
+            {
+                "id": s.get("id") or s.get("url"),
+                "url": s.get("url"),
+                "title": s.get("title"),
+                "score": float(s.get("score", 0.0)),
+                "published_at": s.get("published_at"),
+            }
+            for s in sources
+        ],
         "signals": signals,
         "grounding": "fallback_without_llm",
     }
@@ -250,7 +318,17 @@ def _groq_json(
         }
     }
 
-    sys = "You generate fintech/BFSI competitive battlecards from provided evidence and scored signals only. Never fabricate. Return strict JSON only."
+    # Reasoning-first system prompt (decision logic, evidence-linked, no generic claims)
+    sys = (
+        "You are a decision-first analyst for sales enablement.\n"
+        "Rules: Force comparison not description. Force trade-offs not features. Force specificity — ban generic words like 'scalable', 'flexible', 'robust', 'seamless'.\n"
+        "For every claim you output, attach explicit evidence: which signals support it (ids) and which sources (urls) and their publish dates.\n"
+        "Structure: For the 'Why We Win vs {competitor}' section produce items in the form:\n"
+        "  Trigger → Weakness → Our Advantage → Sales Angle\n"
+        "Example: 'If speed matters → competitor onboarding takes 3+ weeks → we deploy in 3 days → push quick go-live.'\n"
+        "Contradictions: If 2+ medium-or-higher confidence sources disagree on an important topic (pricing, support, reliability, onboarding), output a 'CONTRADICTION' entry showing both sides and their supporting sources.\n"
+        "Output: Strict JSON following the provided output_schema. Do NOT invent facts; if evidence is missing, return the explicit string: 'Not enough public data found.'"
+    )
     user = json.dumps(prompt_payload)
     completion = client.chat.completions.create(
         model=model,
@@ -278,7 +356,17 @@ def generate_battlecard_json(
         payload = _groq_json(competitor_name, snippets, sources, signals)
         payload["grounding"] = "groq"
         payload["signals"] = signals
-        payload["sources"] = payload.get("sources") or [{"url": s["url"], "title": s["title"]} for s in sources]
+        # Ensure sources include ids, score, and published_at so claims can reference them
+        payload["sources"] = payload.get("sources") or [
+            {
+                "id": s.get("id") or s.get("url"),
+                "url": s.get("url"),
+                "title": s.get("title"),
+                "score": float(s.get("score", 0.0)),
+                "published_at": s.get("published_at"),
+            }
+            for s in sources
+        ]
         # post-process to enforce structure and compression
         return post_process_payload(payload, max_bullets=settings.post_max_bullets, max_words_per_bullet=settings.post_max_words_per_bullet)
     except Exception as exc:
@@ -360,7 +448,7 @@ def _ensure_sales_payload(payload: dict[str, Any]) -> None:
     strengths = grouped.get("strength", [])
     loss_risks = grouped.get("loss_risk", [])
     source_count = len(payload.get("sources") or [])
-    confidence = confidence_from_signals(signals, source_count)
+    confidence = confidence_from_signals(signals, source_count, payload.get("sources") or [])
 
     payload["summary"] = {
         **confidence,
@@ -383,11 +471,11 @@ def _ensure_sales_payload(payload: dict[str, Any]) -> None:
         ),
         "when_we_lose": _normalize_items(
             payload.get("deal_guidance", {}).get("when_we_lose")
-            or [{"claim": _lose_guidance(signal), "citations": _citations(signal)} for signal in (loss_risks + strengths)[:3]]
+            or [{"claim": _lose_guidance(signal, competitor_name), "citations": _citations(signal)} for signal in (loss_risks + strengths)[:3]]
             or [
-                {"claim": "Deeply integrated users with high switching costs.", "citations": []},
-                {"claim": "Global enterprises needing broad customization and platform depth.", "citations": []},
-                {"claim": "Teams already optimized around the competitor's tooling.", "citations": []},
+                {"claim": f"Deeply integrated users with high switching costs around {competitor_name}.", "citations": []},
+                {"claim": f"Global enterprises needing broad customization and platform depth from {competitor_name}.", "citations": []},
+                {"claim": f"Teams already optimized around {competitor_name}'s tooling.", "citations": []},
             ],
             3,
             18,
@@ -412,11 +500,33 @@ def _ensure_sales_payload(payload: dict[str, Any]) -> None:
 
 
 def _build_key_insight(competitor_name: str, weaknesses: list[dict[str, Any]], loss_risks: list[dict[str, Any]]) -> str:
+    """Extract a sharp, data-driven key insight from competitive signals."""
+    # Try to extract a specific claim from evidence
+    def _extract_insight_from_signals(signals: list[dict[str, Any]]) -> str | None:
+        for signal in signals[:2]:
+            evidence = signal.get("evidence", [])
+            if not evidence:
+                continue
+            text = str(evidence[0].get("text", "")).strip()
+            if text and len(text) > 20:
+                label = str(signal.get("label", "")).lower()
+                # Format as a specific insight
+                return f"{competitor_name}'s {label} is a pressure point: {text[:100]}"
+        return None
+
+    # Try weaknesses first
     if weaknesses:
+        insight = _extract_insight_from_signals(weaknesses)
+        if insight:
+            return insight
         labels = ", ".join(str(s.get("label", "friction")) for s in weaknesses[:2])
-        return f"{competitor_name} has scale, but sales can pressure {labels} with Blostem's speed and flexibility."
+        return f"{competitor_name} has scale, but teams struggle with {labels}. We win on speed and simplicity."
+
+    # Fall back to loss_risks
     if loss_risks:
-        return f"{competitor_name} is strongest in enterprise-depth deals; qualify hard before competing on breadth."
+        return f"{competitor_name} is strongest in enterprise-depth deals. Qualify hard before competing on breadth."
+
+    # Default insight
     return f"{competitor_name} can be positioned against Blostem on speed, pricing clarity, support, and flexibility."
 
 
@@ -426,14 +536,14 @@ def _win_guidance(signal: dict[str, Any]) -> str:
     return f"Teams prioritizing {advantage} over {label}."
 
 
-def _lose_guidance(signal: dict[str, Any]) -> str:
+def _lose_guidance(signal: dict[str, Any], competitor_name: str) -> str:
     if signal.get("category") == "enterprise_fit":
-        return "Global enterprises needing deep customization and platform breadth."
+        return f"Global enterprises needing deep customization and platform breadth from {competitor_name}."
     if signal.get("category") == "ecosystem_lock_in":
-        return "Deeply integrated users with high switching costs."
+        return f"Deeply integrated users with high switching costs around {competitor_name}."
     if signal.get("angle") == "strength":
-        return f"Teams already optimized around their {signal.get('label', 'platform')}."
-    return f"Buyers who value {signal.get('label', 'incumbent breadth')} more than speed."
+        return f"Teams already optimized around {competitor_name}'s {signal.get('label', 'platform')}."
+    return f"Buyers who value {competitor_name}'s {signal.get('label', 'incumbent breadth')} more than speed."
 
 
 def _objection_flip(signal: dict[str, Any], competitor_name: str) -> dict[str, Any]:
@@ -549,9 +659,17 @@ def post_process_payload(payload: dict[str, Any], max_bullets: int = 5, max_word
                 # merge citations
                 for existing in out:
                     if existing.get("claim", "").strip().lower() == key:
-                        existing_cits = set(existing.get("citations", []))
-                        existing_cits.update(it.get("citations", []))
-                        existing["citations"] = list(existing_cits)
+                        existing_cits = existing.get("citations", []) or []
+                        new_cits = it.get("citations", []) or []
+                        seen_keys = {_citation_key(citation) for citation in existing_cits}
+                        merged_cits = list(existing_cits)
+                        for citation in new_cits:
+                            citation_key = _citation_key(citation)
+                            if citation_key in seen_keys:
+                                continue
+                            seen_keys.add(citation_key)
+                            merged_cits.append(citation)
+                        existing["citations"] = merged_cits
                         break
                 continue
             seen.add(key)
@@ -560,6 +678,35 @@ def post_process_payload(payload: dict[str, Any], max_bullets: int = 5, max_word
             it_copy.setdefault("citations", [])
             out.append(it_copy)
         return out
+
+    # Remove generic-language claims unless they have supporting evidence (citations or numeric detail)
+    banned_terms = ["scalable", "flexible", "robust", "seamless", "enterprise-grade", "powerful", "scalability", "flexibility"]
+
+    def is_generic_claim(claim: str, citations: list[str]) -> bool:
+        low = (claim or "").lower()
+        if not low:
+            return False
+        # if claim contains numbers or % or currency, consider it specific
+        if re.search(r"\d+|%|\$|€|£|k\b|m\b", low):
+            return False
+        if citations and len(citations) > 0:
+            return False
+        # if any banned term appears, treat as generic
+        return any(term in low for term in banned_terms)
+
+    # Strip generic claims early
+    sections_raw = payload.get("sections", {}) or {}
+    for sec_key, items in list(sections_raw.items()):
+        new_items = []
+        for it in items or []:
+            claim = str(it.get("claim", "") or "")
+            cits = it.get("citations", []) or []
+            if is_generic_claim(claim, cits):
+                # drop generic claim
+                continue
+            new_items.append(it)
+        sections_raw[sec_key] = new_items or items
+    payload["sections"] = sections_raw
 
     # Normalize all sections
     for sec in SECTIONS:
@@ -598,8 +745,14 @@ def post_process_payload(payload: dict[str, Any], max_bullets: int = 5, max_word
 def render_markdown(payload: dict[str, Any]) -> str:
     sources = payload.get("sources", [])
     source_index: dict[str, int] = {}
+    source_index_by_id: dict[str, int] = {}
     for idx, source in enumerate(sources, start=1):
-        source_index[source["url"]] = idx
+        url = source.get("url")
+        sid = source.get("id")
+        if url:
+            source_index[url] = idx
+        if sid:
+            source_index_by_id[str(sid)] = idx
 
     lines = [f"# Battlecard: {payload.get('competitor_name', 'Unknown')}", ""]
     summary = payload.get("summary") or {}
@@ -660,8 +813,25 @@ def render_markdown(payload: dict[str, Any]) -> str:
             claim = item.get("claim", "Not enough public data found.")
             citations = item.get("citations", [])
             labels = []
-            for url in citations:
-                index = source_index.get(url)
+            for cit in citations:
+                # citation can be a url string, id string, or dict with source_id/url
+                cit_id = None
+                cit_url = None
+                if isinstance(cit, dict):
+                    cit_id = cit.get("source_id") or cit.get("id")
+                    cit_url = cit.get("url")
+                else:
+                    # string
+                    if str(cit).startswith("http"):
+                        cit_url = str(cit)
+                    else:
+                        cit_id = str(cit)
+
+                index = None
+                if cit_id:
+                    index = source_index_by_id.get(str(cit_id))
+                if index is None and cit_url:
+                    index = source_index.get(cit_url)
                 if index:
                     labels.append(f"[S{index}]")
             citation_suffix = f" {' '.join(labels)}" if labels else ""

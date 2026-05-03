@@ -22,6 +22,25 @@ def test_multiple_sources_increase_signal_confidence():
     assert confidence_from_signals(signals, 3)["confidence_label"] in {"Medium confidence", "High confidence"}
 
 
+def test_mixed_source_types_improve_confidence_signal():
+    snippets = [
+        {"text": "Official docs highlight fast onboarding for enterprise teams.", "source_url": "https://a.com", "sections": ["onboarding_speed"]},
+        {"text": "Independent reviews mention setup friction and support delays.", "source_url": "https://b.com", "sections": ["support_quality"]},
+        {"text": "News coverage notes pricing changes and customer complaints.", "source_url": "https://c.com", "sections": ["pricing_posture"]},
+    ]
+    sources = [
+        {"url": "https://a.com", "title": "A", "source_type": "official", "score": 3.0},
+        {"url": "https://b.com", "title": "B", "source_type": "review", "score": 2.5},
+        {"url": "https://c.com", "title": "C", "source_type": "news", "score": 2.5},
+    ]
+
+    signals = extract_competitive_signals(snippets, sources)
+    confidence = confidence_from_signals(signals, len(sources), sources)
+
+    assert confidence["confidence_factors"]["source_type_diversity"] > 0
+    assert "source-type mix" in confidence["confidence_explanation"]
+
+
 def test_official_feature_claim_does_not_become_weakness_without_friction_language():
     snippets = [
         {"text": "Stripe offers a powerful payments platform with advanced fraud protection.", "source_url": "https://stripe.com", "sections": ["strengths"]},

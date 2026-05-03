@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronDown, Copy, ExternalLink, PhoneCall } from "lucide-react";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 type SourceItem = {
   url?: string;
@@ -9,11 +9,26 @@ type SourceItem = {
   snippet?: string;
   excerpt?: string;
   summary?: string;
+  source_type?: string;
+  published_at?: string | null;
+  score?: number;
 };
+
+type CitationItem = string | { url?: string; source_id?: string; published_at?: string | null; score?: number };
 
 type SectionItem = {
   claim?: string;
-  citations?: string[];
+  citations?: CitationItem[];
+  has_contradiction?: boolean;
+  contradiction_details?: string | null;
+};
+
+type ConfidenceFactors = {
+  source_count?: number;
+  agreement?: number;
+  source_quality?: number;
+  avg_recency_days?: number;
+  source_type_diversity?: number;
 };
 
 type Summary = {
@@ -21,14 +36,47 @@ type Summary = {
   confidence_label?: string;
   confidence_score?: number;
   confidence_explanation?: string;
+  confidence_factors?: ConfidenceFactors;
   source_count?: number;
   generated_in_seconds?: number | null;
+};
+
+type BattlecardPayload = {
+  competitor_name?: string;
+  summary?: Summary;
+  sources?: SourceItem[];
+  sections?: Record<string, SectionItem[]>;
+  how_to_beat?: SectionItem[];
+  talk_track?: SectionItem[];
+  objection_handling?: ObjectionItem[];
+  deal_guidance?: {
+    when_we_win?: SectionItem[];
+    when_we_lose?: SectionItem[];
+  };
+  customer_reviews?: SectionItem[];
+  signals?: SignalItem[];
+  low_data_warning?: boolean;
+  low_data_message?: string;
+  grounding?: string;
+  partial?: boolean;
+};
+
+type SignalItem = {
+  label?: string;
+  angle?: string;
+  category?: string;
+  support_count?: number;
+  sharpness_score?: number;
+  has_contradiction?: boolean;
+  contradiction_details?: string | null;
 };
 
 type ObjectionItem = {
   objection?: string;
   response?: string;
-  citations?: string[];
+  citations?: CitationItem[];
+  has_contradiction?: boolean;
+  contradiction_details?: string | null;
 };
 
 type SourceLookup = Map<string, { source: SourceItem; index: number }>;
@@ -56,9 +104,12 @@ function CopyButton({ value }: { value: string }) {
 }
 
 function citationLabels(item: SectionItem, sourceIndexByUrl: Map<string, number>) {
-  return ((item.citations ?? []) as string[])
-    .map((url) => ({ url, index: sourceIndexByUrl.get(url) }))
-    .filter((entry) => typeof entry.index === "number") as Array<{ url: string; index: number }>;
+  return (item.citations ?? [])
+    .map((citation) => {
+      const url = typeof citation === "string" ? citation : citation.url;
+      return url ? { url, index: sourceIndexByUrl.get(url) } : null;
+    })
+    .filter((entry): entry is { url: string; index: number } => !!entry && typeof entry.index === "number");
 }
 
 function trimSentence(value: string, maxWords = 8) {
@@ -86,6 +137,29 @@ function tightenInsight(insight: string) {
   const lead = concise.slice(0, marker.index).trim();
   const tail = concise.slice(marker.index).trim();
   return { lead, tail };
+}
+
+function confidencePips(level?: string) {
+  if (level?.toLowerCase().includes("high")) {
+    return 3;
+  }
+  if (level?.toLowerCase().includes("medium")) {
+    return 2;
+  }
+  return 1;
+}
+
+function formatRecency(days?: number) {
+  if (typeof days !== "number") {
+    return "Unknown";
+  }
+  if (days <= 7) {
+    return `${days}d`;
+  }
+  if (days < 30) {
+    return `${Math.round(days)}d`;
+  }
+  return `${Math.round(days / 30)}mo`;
 }
 
 function CitationBadges({
@@ -135,42 +209,79 @@ function SummaryBar({
   summary,
   sources,
   liveMode,
+  confidenceOpen,
+  onToggleConfidence,
   onToggle,
 }: {
   competitor: string;
   summary?: Summary;
   sources: SourceItem[];
   liveMode: boolean;
+  confidenceOpen: boolean;
+  onToggleConfidence: () => void;
   onToggle: () => void;
 }) {
   const generated = summary?.generated_in_seconds ? `${summary.generated_in_seconds}s` : "-";
   const sourceCount = summary?.source_count ?? sources.length;
   const confidence = summary?.confidence_label ?? "Low confidence";
   const confidenceTitle = summary?.confidence_explanation ?? `Based on ${sourceCount} sources and available signal agreement.`;
+  const factors = summary?.confidence_factors ?? {};
+  const pips = confidencePips(confidence);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[13px] text-slate-700 xl:flex-row xl:items-center xl:justify-between">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-slate-950">{competitor}</span>
-        <span className="text-slate-300">|</span>
-        <span>{sourceCount} sources</span>
-        <span className="text-slate-300">|</span>
-        <span title={confidenceTitle}>{confidence}</span>
-        <span className="text-slate-300">|</span>
-        <span>Generated in {generated}</span>
+    <div className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-[13px] text-slate-700">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-950">{competitor}</span>
+          <span className="text-slate-300">|</span>
+          <span>{sourceCount} sources</span>
+          <span className="text-slate-300">|</span>
+          <button
+            type="button"
+            onClick={onToggleConfidence}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-semibold text-slate-800 hover:border-slate-300 hover:bg-white"
+            title={confidenceTitle}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <span
+                  key={index}
+                  className={`h-2.5 w-2.5 rounded-full ${index < pips ? (pips === 3 ? "bg-emerald-500" : pips === 2 ? "bg-amber-500" : "bg-rose-500") : "bg-slate-200"}`}
+                />
+              ))}
+            </span>
+            <span>{confidence}</span>
+            <ChevronDown className={`h-3.5 w-3.5 transition ${confidenceOpen ? "rotate-180" : ""}`} />
+          </button>
+          <span className="text-slate-300">|</span>
+          <span>Generated in {generated}</span>
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-2 text-[12px] font-semibold tracking-wide ${
+            liveMode
+              ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-sm"
+              : "border-slate-200 bg-white text-slate-700"
+          }`}
+        >
+          <PhoneCall className="h-3.5 w-3.5" />
+          Live Mode {liveMode ? "ON" : "OFF"}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onToggle}
-        className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-2 text-[12px] font-semibold tracking-wide ${
-          liveMode
-            ? "border-emerald-500 bg-emerald-100 text-emerald-800 shadow-sm"
-            : "border-slate-200 bg-white text-slate-700"
-        }`}
-      >
-        <PhoneCall className="h-3.5 w-3.5" />
-        Live Mode {liveMode ? "ON" : "OFF"}
-      </button>
+      {confidenceOpen ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-[12px] text-slate-600">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
+            <span><strong className="text-slate-900">Score</strong>: {summary?.confidence_score ?? 0}</span>
+            <span><strong className="text-slate-900">Agreement</strong>: {typeof factors.agreement === "number" ? `${Math.round(factors.agreement * 100)}%` : "Unknown"}</span>
+            <span><strong className="text-slate-900">Quality</strong>: {typeof factors.source_quality === "number" ? `${factors.source_quality}/5` : "Unknown"}</span>
+            <span><strong className="text-slate-900">Recency</strong>: {formatRecency(factors.avg_recency_days)}</span>
+            <span><strong className="text-slate-900">Sources</strong>: {factors.source_count ?? sourceCount}</span>
+            <span><strong className="text-slate-900">Mix</strong>: {typeof factors.source_type_diversity === "number" ? `${Math.round(factors.source_type_diversity * 100)}%` : "Unknown"}</span>
+          </div>
+          <p className="mt-2 leading-5 text-slate-600">{confidenceTitle}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -189,21 +300,57 @@ function KeyInsight({ summary }: { summary?: Summary }) {
   );
 }
 
+function ContradictionPanel({ signals }: { signals: SignalItem[] }) {
+  const contradictions = signals.filter((signal) => signal.has_contradiction);
+  if (!contradictions.length) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-lg border border-rose-200 bg-rose-50/80 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">Contradictions</p>
+          <h3 className="mt-1 text-lg font-semibold text-slate-950">Conflicting evidence worth calling out</h3>
+        </div>
+        <div className="rounded-full border border-rose-200 bg-white px-2 py-1 text-[11px] font-semibold text-rose-700">{contradictions.length}</div>
+      </div>
+      <div className="mt-3 space-y-2">
+        {contradictions.map((signal, index) => (
+          <div key={`${signal.label ?? signal.angle ?? "signal"}-${index}`} className="rounded-lg border border-white/80 bg-white p-3 text-sm text-slate-700">
+            <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.16em] text-rose-700">
+              <span>{signal.label ?? "Signal"}</span>
+              {signal.category ? <span className="rounded-full bg-rose-50 px-2 py-0.5 text-rose-800">{signal.category}</span> : null}
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">{signal.angle ?? "mixed"}</span>
+            </div>
+            <p className="mt-1 leading-6 text-slate-800">{signal.contradiction_details ?? "Conflicting evidence exists, but the detail line was not generated."}</p>
+            <div className="mt-2 text-[12px] text-slate-500">
+              {typeof signal.support_count === "number" ? `${signal.support_count} supporting sources` : "Supporting sources unavailable"}
+              {typeof signal.sharpness_score === "number" ? ` · sharpness ${signal.sharpness_score}` : ""}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function isEmptyClaim(item?: SectionItem) {
   return !item?.claim || item.claim === "Not enough public data found.";
 }
 
-function usefulItems(items?: SectionItem[], limit = 3) {
+function usefulItems(items?: SectionItem[], limit = 100) {
   return (items ?? []).filter((item) => !isEmptyClaim(item)).slice(0, limit);
 }
 
 function buildDisplayPayload(payload: any, sources: SourceItem[]) {
   const sections = payload?.sections || {};
-  const weaknesses = usefulItems(sections.weaknesses_risks, 3);
-  const strengths = usefulItems(sections.strengths, 3);
-  const pricing = usefulItems(sections.pricing_posture, 2);
-  const customerReviews = usefulItems(sections.customer_reviews, 3);
-  const talk = usefulItems(sections.sales_talk_track_objection_handling, 3);
+  const competitorName = payload?.competitor_name ?? "this competitor";
+  const weaknesses = usefulItems(sections.weaknesses_risks);
+  const strengths = usefulItems(sections.strengths);
+  const pricing = usefulItems(sections.pricing_posture);
+  const customerReviews = usefulItems(sections.customer_reviews);
+  const talk = usefulItems(sections.sales_talk_track_objection_handling);
 
   const fallbackHowToBeat = weaknesses.length
     ? weaknesses.map((item) => ({
@@ -234,23 +381,23 @@ function buildDisplayPayload(payload: any, sources: SourceItem[]) {
 
   const fallbackLose = [
     {
-      claim: "Deeply integrated users with high switching costs.",
+      claim: `Deeply integrated users with high switching costs around ${competitorName}.`,
       citations: [],
     },
     {
-      claim: "Large enterprises already deeply embedded in the competitor ecosystem.",
+      claim: `Large enterprises already deeply embedded in ${competitorName}'s ecosystem.`,
       citations: [],
     },
     {
-      claim: "Teams already optimized around the competitor's tooling.",
+      claim: `Teams already optimized around ${competitorName}'s tooling.`,
       citations: [],
     },
   ];
 
   const fallbackObjections = [
     {
-      objection: `${payload.competitor_name ?? "The competitor"} feels safer.`,
-      response: "Safe can become slow; Blostem wins when speed, support, and flexibility matter.",
+      objection: `${competitorName} feels safer.`,
+      response: `Safe can become slow; Blostem wins when speed, support, and flexibility matter versus ${competitorName}.`,
       citations: [],
     },
   ];
@@ -266,14 +413,19 @@ function buildDisplayPayload(payload: any, sources: SourceItem[]) {
       source_count: sources.length,
       generated_in_seconds: null,
     },
-    howToBeat: usefulItems(payload.how_to_beat, 4).length ? usefulItems(payload.how_to_beat, 4) : fallbackHowToBeat,
-    talkTrack: usefulItems(payload.talk_track, 3).length ? usefulItems(payload.talk_track, 3) : fallbackTalkTrack,
+    howToBeat: usefulItems(payload.how_to_beat).length ? usefulItems(payload.how_to_beat) : fallbackHowToBeat,
+    talkTrack: usefulItems(payload.talk_track).length ? usefulItems(payload.talk_track) : fallbackTalkTrack,
     objectionHandling: (payload.objection_handling ?? fallbackObjections) as ObjectionItem[],
     dealGuidance: payload.deal_guidance ?? {
       when_we_win: fallbackWin.slice(0, 3),
       when_we_lose: fallbackLose,
     },
-    customerReviews: customerReviews.length ? customerReviews : usefulItems(sections.customer_sentiment, 2),
+    customerReviews: customerReviews.length ? customerReviews : usefulItems(sections.customer_sentiment),
+    signals: (payload?.signals || []) as SignalItem[],
+    lowDataWarning: Boolean(payload?.low_data_warning),
+    lowDataMessage: payload?.low_data_message,
+    grounding: payload?.grounding,
+    partial: Boolean(payload?.partial),
   };
 }
 
@@ -308,6 +460,8 @@ function ObjectionHandling({
             <div className="font-semibold text-slate-900">Objection: {item.objection ?? "Objection unavailable."}</div>
             <div className="mt-1 font-medium leading-6 text-fuchsia-900">{"->"} Flip: {item.response ?? "Response unavailable."}</div>
             <CitationBadges item={{ claim: item.response, citations: item.citations }} sourceIndexByUrl={sourceIndexByUrl} sourceByUrl={sourceByUrl} onOpenSource={onOpenSource} />
+            {item.has_contradiction ? <div className="mt-2 inline-flex rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Contradiction</div> : null}
+            {item.contradiction_details ? <p className="mt-2 text-[12px] leading-5 text-rose-700">{item.contradiction_details}</p> : null}
           </li>
         ))}
       </ul>
@@ -379,9 +533,11 @@ function ActionList({
           <li key={`${title}-${idx}`} className="rounded-lg border border-white/80 bg-white/85 p-3.5">
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1 font-semibold leading-6">{item.claim ?? "Not enough public data found."}</div>
+              {item.has_contradiction ? <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Contradiction</span> : null}
               {copyable && allowItemCopy ? <CopyButton value={item.claim ?? ""} /> : null}
             </div>
             <CitationBadges item={item} sourceIndexByUrl={sourceIndexByUrl} sourceByUrl={sourceByUrl} onOpenSource={onOpenSource} />
+            {item.contradiction_details ? <p className="mt-2 text-[12px] leading-5 text-rose-700">{item.contradiction_details}</p> : null}
           </li>
         ))}
       </ul>
@@ -445,7 +601,7 @@ function SectionCard({
   onOpenSource: (url: string) => void;
 }) {
   const theme = SECTION_STYLES[sectionKey] || { shell: "border-slate-200 bg-white", accent: "text-slate-700", eyebrow: "Section" };
-  const filteredItems = usefulItems(items, 3);
+  const filteredItems = usefulItems(items);
   const safeItems = filteredItems.length ? filteredItems : [{ claim: "Not enough public data found.", citations: [] }];
 
   return (
@@ -465,8 +621,12 @@ function SectionCard({
                 {idx + 1}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="font-semibold leading-6 text-slate-900">{item.claim ?? "Not enough public data found."}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-semibold leading-6 text-slate-900">{item.claim ?? "Not enough public data found."}</div>
+                  {item.has_contradiction ? <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Contradiction</span> : null}
+                </div>
                 <CitationBadges item={item} sourceIndexByUrl={sourceIndexByUrl} sourceByUrl={sourceByUrl} onOpenSource={onOpenSource} />
+                {item.contradiction_details ? <p className="mt-2 text-[12px] leading-5 text-rose-700">{item.contradiction_details}</p> : null}
               </div>
             </div>
           </li>
@@ -504,7 +664,7 @@ function DeepResearchAccordion({
         <h3 className="text-sm font-semibold text-slate-900">Deep research</h3>
       </div>
       {order.map((key) => {
-        const items = usefulItems((sections[key] || []) as SectionItem[], 3);
+        const items = usefulItems((sections[key] || []) as SectionItem[]);
         if (!items.length) {
           return null;
         }
@@ -562,6 +722,11 @@ function SourcesDrawer({ sources, openSourceUrl }: { sources: SourceItem[]; open
                   <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                 </div>
                 <div className="mt-1 break-all text-xs text-slate-500">{url}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  {source.source_type ? <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{source.source_type}</span> : null}
+                  {source.published_at ? <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">{source.published_at}</span> : null}
+                  {typeof source.score === "number" ? <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-600">score {source.score.toFixed(2)}</span> : null}
+                </div>
               </a>
             );
           })
@@ -592,6 +757,11 @@ function SourceModal({
         <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Source S{index}</div>
         <h3 className="mt-1 text-base font-semibold text-slate-950">{title}</h3>
         <p className="mt-2 break-all text-sm text-slate-600">{url}</p>
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500">
+          {source.source_type ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">{source.source_type}</span> : null}
+          {source.published_at ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">{source.published_at}</span> : null}
+          {typeof source.score === "number" ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">score {source.score.toFixed(2)}</span> : null}
+        </div>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             Close
@@ -605,8 +775,9 @@ function SourceModal({
   );
 }
 
-export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) {
-  const [liveMode, setLiveMode] = useState(true);
+export function BattlecardCards({ payload, initialMode = "live" }: { payload?: any; events?: any[]; initialMode?: "live" | "deep" }) {
+  const [liveMode, setLiveMode] = useState(initialMode !== "deep");
+  const [confidenceOpen, setConfidenceOpen] = useState(false);
   const [openSourceUrl, setOpenSourceUrl] = useState<string | null>(null);
   const sources = (payload?.sources || []) as SourceItem[];
   const sourceIndexByUrl = useMemo(() => {
@@ -620,6 +791,12 @@ export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) 
   }, [sources]);
   const sourceByUrl = useMemo(() => new Map(sources.map((source, idx) => [String(source.url ?? ""), { source, index: idx + 1 }])), [sources]);
   const activeSource = openSourceUrl ? sourceByUrl.get(openSourceUrl) : undefined;
+  const signals = ((payload?.signals || []) as SignalItem[]).filter((signal) => signal.has_contradiction);
+  const display = buildDisplayPayload(payload, sources);
+
+  useEffect(() => {
+    setLiveMode(initialMode !== "deep");
+  }, [initialMode]);
 
   if (!payload) {
     return (
@@ -643,7 +820,6 @@ export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) 
   };
 
   const sections = payload.sections || {};
-  const display = buildDisplayPayload(payload, sources);
 
   return (
     <div className="space-y-4">
@@ -660,12 +836,23 @@ export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) 
           summary={display.summary}
           sources={sources}
           liveMode={liveMode}
+          confidenceOpen={confidenceOpen}
+          onToggleConfidence={() => setConfidenceOpen((value) => !value)}
           onToggle={() => setLiveMode((value) => !value)}
         />
+
+        {display.lowDataWarning ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Live evidence is sparse</div>
+            <div className="mt-1 leading-5">{display.lowDataMessage ?? "This run is using partial live evidence and fallback synthesis."}</div>
+            {display.grounding ? <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-amber-700">Grounding: {display.grounding}</div> : null}
+          </div>
+        ) : null}
 
         <div className="space-y-6">
           <div className="space-y-3">
             <KeyInsight summary={display.summary} />
+            <ContradictionPanel signals={signals} />
           </div>
 
           <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
@@ -744,3 +931,4 @@ export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) 
     </div>
   );
 }
+

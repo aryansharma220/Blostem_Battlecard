@@ -27,6 +27,10 @@ export interface BattlecardRun {
   sources: Array<Record<string, unknown>>;
   snippets: Array<Record<string, unknown>>;
   events: PipelineEvent[];
+  confidence_score?: number | null;
+  confidence_label?: string | null;
+  confidence_factors?: Record<string, unknown> | null;
+  confidence_explanation?: string | null;
   created_at: string;
   updated_at: string;
 }

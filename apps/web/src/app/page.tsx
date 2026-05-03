@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { deleteRun, generateBattlecard, getBattlecard, getRecentRuns, refreshRun } from "@/lib/api";
-import type { RecentRun } from "@/lib/api";
+import type { BattlecardMode, RecentRun } from "@/lib/api";
 import type { BattlecardRun } from "@/types/battlecard";
 
 const ACTIVE_STATUSES = new Set([
@@ -28,6 +28,7 @@ export default function HomePage() {
   const [competitor, setCompetitor] = useState("");
   const [run, setRun] = useState<BattlecardRun | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  const [mode, setMode] = useState<BattlecardMode>("live");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
@@ -126,7 +127,7 @@ export default function HomePage() {
 
     setLoading(true);
     try {
-      const generated = await generateBattlecard(competitor.trim());
+      const generated = await generateBattlecard(competitor.trim(), mode);
       setRunId(generated.run_id);
     } catch {
       setError("Generation request failed.");
@@ -155,6 +156,22 @@ export default function HomePage() {
             value={competitor}
             onChange={(e) => setCompetitor(e.target.value)}
           />
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            <button
+              type="button"
+              onClick={() => setMode("live")}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${mode === "live" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}
+            >
+              Live
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("deep")}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${mode === "deep" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}
+            >
+              Deep
+            </button>
+          </div>
           <Button size="lg" onClick={onGenerate} disabled={loading || isActive}>
             {loading ? "Starting..." : isActive ? "In progress..." : "Generate Battlecard"}
           </Button>
@@ -162,7 +179,9 @@ export default function HomePage() {
         {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
         {run ? (
           <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">
-            Run: {run.id} | Status: {run.status}{run.canonical_domain ? ` | Domain: ${run.canonical_domain}` : ""}
+            Run: {run.id} | Mode: {mode} | Status: {run.status}
+            {run.confidence_label ? ` | Confidence: ${run.confidence_label}` : ""}
+            {run.canonical_domain ? ` | Domain: ${run.canonical_domain}` : ""}
           </p>
         ) : null}
       </section>
@@ -182,7 +201,7 @@ export default function HomePage() {
           />
         </div>
 
-        <BattlecardViewer markdown={run?.markdown} payload={run?.battlecard} events={run?.events} />
+        <BattlecardViewer markdown={run?.markdown} payload={run?.battlecard} events={run?.events} mode={mode} />
       </section>
 
       <Dialog

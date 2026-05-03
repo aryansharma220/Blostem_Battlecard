@@ -21,6 +21,11 @@ export function CitationList({ sources }: { sources: Array<Record<string, unknow
               >
                 <div className="font-medium text-slate-800">S{idx + 1} - {title}</div>
                 <div className="mt-1 break-all text-xs text-slate-500">{url}</div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                  {source.source_type ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{String(source.source_type)}</span> : null}
+                  {source.published_at ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">{String(source.published_at)}</span> : null}
+                  {typeof source.score === "number" ? <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600">score {Number(source.score).toFixed(2)}</span> : null}
+                </div>
               </a>
             );
           })

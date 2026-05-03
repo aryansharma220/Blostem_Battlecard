@@ -48,7 +48,7 @@ def rank_and_dedupe_sources(
 
     ranked = []
     seen_domains: dict[str, int] = {}
-    for page in crawled:
+    for idx, page in enumerate(crawled, start=1):
         url = str(page.get("url", ""))
         domain = str(page.get("domain", ""))
         if not url or not domain:
@@ -61,11 +61,13 @@ def rank_and_dedupe_sources(
         seen_domains[domain_key] = seen_domains.get(domain_key, 0) + 1
         ranked.append(
             {
+                "id": f"S{idx}",
                 "url": url,
                 "title": str(page.get("title") or title_by_url.get(url) or url),
                 "source_type": "official" if canonical_domain and canonical_domain in domain else source_type,
                 "score": score_source(url, canonical_domain, title_by_url.get(url, ""), source_type=source_type),
                 "text": str(page.get("text") or ""),
+                "published_at": page.get("published_at"),
             }
         )
 

@@ -18,8 +18,8 @@ from app.db.database import update_run
 router = APIRouter(prefix="/api/battlecard", tags=["battlecard"])
 
 
-def _run_pipeline_sync(run_id: str, competitor_name: str, force_refresh: bool = False) -> None:
-    asyncio.run(pipeline_service.run(run_id, competitor_name, force_refresh=force_refresh))
+def _run_pipeline_sync(run_id: str, competitor_name: str, force_refresh: bool = False, mode: str = "live") -> None:
+    asyncio.run(pipeline_service.run(run_id, competitor_name, force_refresh=force_refresh, mode=mode))
 
 
 def _regenerate_pdf_sync(run_id: str) -> None:
@@ -35,6 +35,20 @@ def _regenerate_pdf_sync(run_id: str) -> None:
         update_run(run_id, pdf_path=pdf_path)
 
 
+def _confidence_from_run(run: dict) -> dict[str, object]:
+    payload = run.get("json_output") or {}
+    summary = payload.get("summary") if isinstance(payload, dict) else {}
+    if not isinstance(summary, dict):
+        summary = {}
+
+    return {
+        "confidence_score": summary.get("confidence_score"),
+        "confidence_label": summary.get("confidence_label"),
+        "confidence_factors": summary.get("confidence_factors"),
+        "confidence_explanation": summary.get("confidence_explanation"),
+    }
+
+
 @router.post("/generate", response_model=GenerateBattlecardResponse)
 def generate_battlecard(request: GenerateBattlecardRequest, background_tasks: BackgroundTasks) -> GenerateBattlecardResponse:
     competitor = request.competitor_name.strip()
@@ -43,7 +57,7 @@ def generate_battlecard(request: GenerateBattlecardRequest, background_tasks: Ba
 
     run_id = str(uuid.uuid4())
     create_run(run_id, competitor)
-    background_tasks.add_task(_run_pipeline_sync, run_id, competitor)
+    background_tasks.add_task(_run_pipeline_sync, run_id, competitor, False, request.mode)
     return GenerateBattlecardResponse(run_id=run_id, status="queued")
 
 
@@ -52,6 +66,8 @@ def get_battlecard(run_id: str) -> BattlecardRunResponse:
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+
+    confidence = _confidence_from_run(run)
 
     return BattlecardRunResponse(
         id=run["id"],
@@ -65,6 +81,10 @@ def get_battlecard(run_id: str) -> BattlecardRunResponse:
         snippets=run.get("snippets_json") or [],
         events=run.get("events") or [],
         pdf_path=run.get("pdf_path"),
+        confidence_score=confidence["confidence_score"],
+        confidence_label=confidence["confidence_label"],
+        confidence_factors=confidence["confidence_factors"],
+        confidence_explanation=confidence["confidence_explanation"],
         created_at=run["created_at"],
         updated_at=run["updated_at"],
     )
