@@ -8,8 +8,10 @@ import { DownloadPdfButton } from "@/components/battlecard/DownloadPdfButton";
 import { ProgressState } from "@/components/battlecard/ProgressState";
 import { RecentRuns } from "@/components/battlecard/RecentRuns";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { generateBattlecard, getBattlecard, getRecentRuns } from "@/lib/api";
+import { deleteRun, generateBattlecard, getBattlecard, getRecentRuns, refreshRun } from "@/lib/api";
+import type { RecentRun } from "@/lib/api";
 import type { BattlecardRun } from "@/types/battlecard";
 
 const ACTIVE_STATUSES = new Set([
@@ -28,13 +30,48 @@ export default function HomePage() {
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [recentRuns, setRecentRuns] = useState<Array<Record<string, unknown>>>([]);
+  const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<RecentRun | null>(null);
 
   const isActive = useMemo(() => (run ? ACTIVE_STATUSES.has(run.status) : false), [run]);
 
   async function refreshRecent() {
     const rows = await getRecentRuns();
     setRecentRuns(rows);
+  }
+
+  async function handleDeleteRun(id: string) {
+    setError(null);
+
+    try {
+      await deleteRun(id);
+      if (runId === id) {
+        setRunId(null);
+        setRun(null);
+      }
+      await refreshRecent();
+    } catch {
+      setError("Unable to delete run.");
+    }
+  }
+
+  function openDeleteDialog(id: string) {
+    const target = recentRuns.find((run) => run.id === id) ?? null;
+    setDeleteTarget(target);
+  }
+
+  async function handleRefreshRun(id: string) {
+    setError(null);
+
+    try {
+      await refreshRun(id);
+      const next = await getBattlecard(id);
+      setRunId(id);
+      setRun(next);
+      await refreshRecent();
+    } catch {
+      setError("Unable to refresh run.");
+    }
   }
 
   useEffect(() => {
@@ -130,8 +167,8 @@ export default function HomePage() {
         ) : null}
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
-        <div className="space-y-6">
+      <section className="grid gap-6 lg:grid-cols-[250px_minmax(0,1fr)]">
+        <div className="space-y-4 opacity-90">
           <ProgressState status={run?.status ?? "queued"} events={run?.events ?? []} />
           <RecentRuns
             runs={recentRuns}
@@ -140,11 +177,47 @@ export default function HomePage() {
               setRunId(id);
               setError(null);
             }}
+            onRefresh={handleRefreshRun}
+            onDelete={openDeleteDialog}
           />
         </div>
 
         <BattlecardViewer markdown={run?.markdown} payload={run?.battlecard} events={run?.events} />
       </section>
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete recent run?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove {deleteTarget?.competitor_name ?? "this run"}, including its history and PDF artifact.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!deleteTarget) {
+                  return;
+                }
+                await handleDeleteRun(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              Delete run
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

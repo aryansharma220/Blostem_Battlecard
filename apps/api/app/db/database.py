@@ -101,6 +101,55 @@ def update_run(run_id: str, **fields: Any) -> None:
     conn.close()
 
 
+def reset_run(run_id: str) -> None:
+    run = get_run(run_id)
+    if run is None:
+        return
+
+    pdf_path = run.get("pdf_path")
+    if pdf_path:
+        try:
+            Path(str(pdf_path)).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    conn = get_connection()
+    conn.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
+    conn.execute("DELETE FROM cache_entries WHERE run_id = ?", (run_id,))
+    conn.execute(
+        """
+        UPDATE runs
+        SET status = ?, error_message = NULL, canonical_domain = NULL, markdown = NULL,
+            json_output = NULL, pdf_path = NULL, sources_json = NULL, snippets_json = NULL,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        ("queued", utcnow_iso(), run_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_run(run_id: str) -> None:
+    run = get_run(run_id)
+    if run is None:
+        return
+
+    pdf_path = run.get("pdf_path")
+    if pdf_path:
+        try:
+            Path(str(pdf_path)).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    conn = get_connection()
+    conn.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
+    conn.execute("DELETE FROM cache_entries WHERE run_id = ?", (run_id,))
+    conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+    conn.commit()
+    conn.close()
+
+
 def add_event(run_id: str, stage: str, message: str, progress: int) -> None:
     conn = get_connection()
     conn.execute(

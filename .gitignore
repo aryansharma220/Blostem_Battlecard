@@ -17,3 +17,5 @@ __pycache__/
 apps/api/generated_pdfs/
 apps/api/.ruff_cache/
 .vscode/
+
+requirement.txt

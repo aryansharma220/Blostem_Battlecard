@@ -1,7 +1,6 @@
 import json
 from collections import defaultdict
 from typing import Any
-import difflib
 import re
 
 from app.config import settings
@@ -72,6 +71,9 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
         s = re.sub(r"\s+", " ", s)
         return s
 
+    def token_key(s: str) -> set[str]:
+        return {token for token in re.findall(r"[a-z0-9]+", s.lower()) if len(token) > 3}
+
     unique: list[dict[str, Any]] = []
     seen_texts: set[str] = set()
 
@@ -84,6 +86,7 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
             continue
 
         merged = None
+        norm_tokens = token_key(norm)
         for existing in unique:
             existing_norm = normalize(existing["text"])
             # Avoid over-merging very short claims — require exact match for short texts
@@ -94,7 +97,10 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
                     break
                 continue
 
-            ratio = difflib.SequenceMatcher(None, existing_norm, norm).ratio()
+            existing_tokens = existing.setdefault("_dedupe_tokens", token_key(existing_norm))
+            overlap = len(existing_tokens & norm_tokens)
+            union = len(existing_tokens | norm_tokens) or 1
+            ratio = overlap / union
             if ratio >= similarity_threshold:
                 merged = existing
                 break
@@ -103,7 +109,9 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
             # ensure citations and sections are lists
             sn.setdefault("citations", [sn.get("source_url")])
             sn.setdefault("sections", sn.get("sections", []))
-            unique.append(sn.copy())
+            sn_copy = sn.copy()
+            sn_copy["_dedupe_tokens"] = norm_tokens
+            unique.append(sn_copy)
             seen_texts.add(norm)
         else:
             # merge into existing: prefer longer text, combine citations and sections
@@ -117,6 +125,8 @@ def dedupe_snippets(snippets: list[dict[str, Any]], similarity_threshold: float 
             merged["sections"] = list(merged_sections)
 
     # preserve original order, limit size
+    for item in unique:
+        item.pop("_dedupe_tokens", None)
     return unique[:limit]
 
 
@@ -226,6 +236,7 @@ def _groq_json(
             },
             "how_to_beat": [{"claim": "string", "citations": ["url"]}],
             "talk_track": [{"claim": "string", "citations": ["url"]}],
+            "objection_handling": [{"objection": "string", "response": "string", "citations": ["url"]}],
             "sections": {
                 "<section_name>": [{"claim": "string", "citations": ["url"]}]
             },
@@ -271,12 +282,24 @@ def generate_battlecard_json(
         return post_process_payload(_fallback_json(competitor_name, snippets, sources, signals), max_bullets=settings.post_max_bullets, max_words_per_bullet=settings.post_max_words_per_bullet)
 
 
+def generate_live_call_payload(
+    competitor_name: str,
+    snippets: list[dict[str, Any]],
+    sources: list[dict[str, Any]],
+    signals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    payload = _fallback_json(competitor_name, snippets, sources, signals)
+    payload["grounding"] = "live_call_fast_path"
+    payload["partial"] = True
+    return post_process_payload(payload, max_bullets=3, max_words_per_bullet=18)
+
+
 def _weakness_claim(signal: dict[str, Any]) -> str:
     label = str(signal.get("label", "execution risk"))
     evidence = _first_signal_text(signal)
     if evidence and evidence != label:
-        return f"{label.title()} risk: {evidence}"
-    return f"{label.title()} is a likely pressure point."
+        return _clip_sentence(f"{label.title()} pain: {evidence}", 18)
+    return f"{label.title()} is a pressure point worth attacking."
 
 
 def _strength_claim(signal: dict[str, Any]) -> str:
@@ -297,18 +320,17 @@ def _clip_sentence(text: str, max_words: int) -> str:
 def _sales_angle(signal: dict[str, Any]) -> str:
     category = str(signal.get("category", "complexity"))
     competitor_issue = str(signal.get("label", "friction"))
-    blostem_advantage = str(signal.get("blostem_advantage", "focused execution"))
     templates = {
-        "complexity": f"Emphasize simpler rollout vs {competitor_issue}.",
-        "pricing_friction": f"Highlight transparent pricing vs {competitor_issue}.",
-        "onboarding_speed": f"Lead with faster go-live vs {competitor_issue}.",
-        "support_quality": f"Position better support vs {competitor_issue}.",
-        "customization": f"Sell flexibility vs {competitor_issue}.",
-        "ecosystem_lock_in": f"Sell control and portability vs {competitor_issue}.",
-        "reliability": f"Reassure buyers with focused execution around {competitor_issue}.",
-        "enterprise_fit": f"Qualify hard when the buyer needs enterprise depth.",
+        "complexity": "Their complexity slows teams down; attack with simpler rollout and faster go-live.",
+        "pricing_friction": "Push hard on pricing predictability; contrast their layered fees with transparent pricing.",
+        "onboarding_speed": "Make speed the wedge; position faster go-live as the reason to switch.",
+        "support_quality": "Attack support gaps; sell hands-on help when buyers need fast answers.",
+        "customization": "Call out rigid workflows; position Blostem as the flexible fit.",
+        "ecosystem_lock_in": "Pressure lock-in risk; sell freedom from one ecosystem.",
+        "reliability": "Acknowledge scale, then shift to speed and flexibility for the buyer's actual stage.",
+        "enterprise_fit": "Do not fight breadth; qualify out deep-enterprise platform deals early.",
     }
-    return templates.get(category, f"Use {blostem_advantage} against {competitor_issue}.")
+    return templates.get(category, f"Turn {competitor_issue} into the reason to choose Blostem now.")
 
 
 def _talk_track(signal: dict[str, Any], competitor_name: str) -> str:
@@ -344,6 +366,9 @@ def _ensure_sales_payload(payload: dict[str, Any]) -> None:
         or _build_key_insight(competitor_name, weaknesses, loss_risks),
     }
 
+    objection_items = payload.get("objection_handling") or [_objection_flip(signal, competitor_name) for signal in (weaknesses + strengths + loss_risks)[:4]]
+    payload["objection_handling"] = _normalize_objections(objection_items[:4])
+
     payload["deal_guidance"] = {
         "when_we_win": _normalize_items(
             payload.get("deal_guidance", {}).get("when_we_win")
@@ -354,8 +379,12 @@ def _ensure_sales_payload(payload: dict[str, Any]) -> None:
         ),
         "when_we_lose": _normalize_items(
             payload.get("deal_guidance", {}).get("when_we_lose")
-            or [{"claim": _lose_guidance(signal), "citations": _citations(signal)} for signal in loss_risks[:2]]
-            or [{"claim": "Large enterprises needing deep customization or broad existing ecosystem commitments.", "citations": []}],
+            or [{"claim": _lose_guidance(signal), "citations": _citations(signal)} for signal in (loss_risks + strengths)[:3]]
+            or [
+                {"claim": "Deeply integrated users with high switching costs.", "citations": []},
+                {"claim": "Global enterprises needing broad customization and platform depth.", "citations": []},
+                {"claim": "Teams already optimized around the competitor's tooling.", "citations": []},
+            ],
             3,
             18,
         ),
@@ -395,8 +424,74 @@ def _win_guidance(signal: dict[str, Any]) -> str:
 
 def _lose_guidance(signal: dict[str, Any]) -> str:
     if signal.get("category") == "enterprise_fit":
-        return "Enterprises needing deep customization, global scale, or existing ecosystem depth."
+        return "Global enterprises needing deep customization and platform breadth."
+    if signal.get("category") == "ecosystem_lock_in":
+        return "Deeply integrated users with high switching costs."
+    if signal.get("angle") == "strength":
+        return f"Teams already optimized around their {signal.get('label', 'platform')}."
     return f"Buyers who value {signal.get('label', 'incumbent breadth')} more than speed."
+
+
+def _objection_flip(signal: dict[str, Any], competitor_name: str) -> dict[str, Any]:
+    category = str(signal.get("category", "complexity"))
+    citations = _citations(signal)
+    if category == "reliability":
+        return {
+            "objection": f"{competitor_name} is more reliable.",
+            "response": "True at massive scale; most teams need speed, flexibility, and hands-on execution more.",
+            "citations": citations,
+        }
+    if category == "enterprise_fit":
+        return {
+            "objection": f"{competitor_name} is the enterprise standard.",
+            "response": "That is exactly why it can feel heavy; Blostem wins when the team needs speed over breadth.",
+            "citations": citations,
+        }
+    if category == "pricing_friction":
+        return {
+            "objection": f"{competitor_name} pricing is proven.",
+            "response": "Proven does not mean predictable; use Blostem when pricing clarity matters.",
+            "citations": citations,
+        }
+    if category == "ecosystem_lock_in":
+        return {
+            "objection": f"We are already in the {competitor_name} ecosystem.",
+            "response": "That is the risk: switching gets harder later, so keep the workflow flexible now.",
+            "citations": citations,
+        }
+    return {
+        "objection": f"{competitor_name} is the safer choice.",
+        "response": "Safe can become slow; Blostem is the better fit when speed and support matter now.",
+        "citations": citations,
+    }
+
+
+def _normalize_objections(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    seen = set()
+    for item in items:
+        objection = str(item.get("objection", "")).strip()
+        response = str(item.get("response", "")).strip()
+        if not objection or not response:
+            continue
+        key = objection.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "objection": _clip_sentence(objection, 12),
+                "response": _clip_sentence(response, 18),
+                "citations": item.get("citations", []) or [],
+            }
+        )
+    return out or [
+        {
+            "objection": "The competitor feels safer.",
+            "response": "Safe can become slow; Blostem wins when speed, support, and flexibility matter.",
+            "citations": [],
+        }
+    ]
 
 
 def _normalize_items(
@@ -528,6 +623,13 @@ def render_markdown(payload: dict[str, Any]) -> str:
         lines.append("## Talk track")
         for item in payload.get("talk_track", []):
             lines.append(f"- {item.get('claim', 'Not enough public data found.')}")
+        lines.append("")
+
+    if payload.get("objection_handling"):
+        lines.append("## Objection handling")
+        for item in payload.get("objection_handling", []):
+            lines.append(f"- Objection: {item.get('objection', 'Not enough public data found.')}")
+            lines.append(f"  Response: {item.get('response', 'Not enough public data found.')}")
         lines.append("")
 
     section_titles = {

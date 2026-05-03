@@ -166,6 +166,8 @@ def extract_competitive_signals(
 def confidence_from_signals(signals: list[dict[str, Any]], source_count: int) -> dict[str, Any]:
     if not signals or source_count == 0:
         score = 0.0
+        avg_agreement = 0.0
+        avg_quality = 0.0
     else:
         avg_agreement = sum(float(signal.get("agreement", 0)) for signal in signals[:5]) / min(len(signals), 5)
         avg_quality = sum(float(signal.get("source_quality", 0)) for signal in signals[:5]) / min(len(signals), 5)
@@ -178,7 +180,20 @@ def confidence_from_signals(signals: list[dict[str, Any]], source_count: int) ->
     else:
         label = "Low confidence"
 
-    return {"confidence_score": round(score, 2), "confidence_label": label}
+    explanation = (
+        f"Based on {source_count} sources, {round(avg_agreement * 100)}% signal agreement, "
+        f"and {round(avg_quality, 1)}/5 average source quality."
+    )
+    return {
+        "confidence_score": round(score, 2),
+        "confidence_label": label,
+        "confidence_explanation": explanation,
+        "confidence_factors": {
+            "source_count": source_count,
+            "agreement": round(avg_agreement, 2),
+            "source_quality": round(avg_quality, 2),
+        },
+    }
 
 
 def signals_by_angle(signals: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:

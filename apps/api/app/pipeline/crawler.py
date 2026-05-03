@@ -30,7 +30,7 @@ def clean_text(html: str) -> str:
 async def fetch_url(url: str) -> dict[str, str | None]:
     headers = {"User-Agent": USER_AGENT}
     try:
-        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
         text = clean_text(response.text)
@@ -51,7 +51,7 @@ async def fetch_url(url: str) -> dict[str, str | None]:
         return {"url": url, "domain": urlparse(url).netloc, "title": "", "text": ""}
 
 
-async def crawl_sources(sources: list[dict[str, str]], limit: int = 16) -> list[dict[str, str | None]]:
+async def crawl_sources(sources: list[dict[str, str]], limit: int = 6) -> list[dict[str, str | None]]:
     selected = sources[:limit]
     tasks = [fetch_url(s["url"]) for s in selected]
     results = await asyncio.gather(*tasks)

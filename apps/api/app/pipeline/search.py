@@ -26,7 +26,7 @@ async def search_duckduckgo(query: str, max_results: int = 8) -> list[dict[str, 
     headers = {"User-Agent": USER_AGENT}
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
             response = await client.get(endpoint, params=params, headers=headers)
             response.raise_for_status()
     except Exception as exc:
@@ -57,9 +57,8 @@ async def discover_sources(competitor_name: str) -> list[dict[str, str]]:
     queries = [
         f"{competitor_name} official site",
         f"{competitor_name} pricing",
-        f"{competitor_name} press release OR newsroom",
-        f"{competitor_name} fintech news",
-        f"{competitor_name} customer reviews",
+        f"{competitor_name} customer reviews complaints",
+        f"{competitor_name} alternative compare",
     ]
     batches = await asyncio.gather(*[search_duckduckgo(q) for q in queries])
 

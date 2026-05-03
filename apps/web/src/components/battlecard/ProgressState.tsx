@@ -19,7 +19,7 @@ export function ProgressState({ status, events }: { status: RunStatus; events: P
   const eventByStage = new Map(events.map((e) => [e.stage, e]));
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-panel">
+    <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-4 shadow-sm">
       <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Pipeline Progress</h3>
       <div className="space-y-2">
         {STAGES.map((stage) => {

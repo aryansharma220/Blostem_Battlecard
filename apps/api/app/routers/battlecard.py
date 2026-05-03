@@ -1,10 +1,10 @@
 import asyncio
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from fastapi.responses import FileResponse
 
-from app.db.database import create_run, get_run, list_recent_runs
+from app.db.database import create_run, delete_run, get_run, list_recent_runs, reset_run
 from app.models.schemas import (
     BattlecardRunResponse,
     GenerateBattlecardRequest,
@@ -12,14 +12,14 @@ from app.models.schemas import (
 )
 from app.services.pipeline import pipeline_service
 from app.services.pdf_export import generate_pdf
-from app.db.database import update_run, get_run
+from app.db.database import update_run
 
 
 router = APIRouter(prefix="/api/battlecard", tags=["battlecard"])
 
 
-def _run_pipeline_sync(run_id: str, competitor_name: str) -> None:
-    asyncio.run(pipeline_service.run(run_id, competitor_name))
+def _run_pipeline_sync(run_id: str, competitor_name: str, force_refresh: bool = False) -> None:
+    asyncio.run(pipeline_service.run(run_id, competitor_name, force_refresh=force_refresh))
 
 
 def _regenerate_pdf_sync(run_id: str) -> None:
@@ -93,6 +93,27 @@ def regenerate_battlecard_pdf(run_id: str, background_tasks: BackgroundTasks) ->
 
     background_tasks.add_task(_regenerate_pdf_sync, run_id)
     return {"run_id": run_id, "status": "regenerating"}
+
+
+@router.post("/{run_id}/refresh")
+def refresh_battlecard(run_id: str, background_tasks: BackgroundTasks) -> dict:
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    reset_run(run_id)
+    background_tasks.add_task(_run_pipeline_sync, run_id, run["competitor_name"], True)
+    return {"run_id": run_id, "status": "queued"}
+
+
+@router.delete("/{run_id}", status_code=204)
+def remove_battlecard(run_id: str) -> Response:
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    delete_run(run_id)
+    return Response(status_code=204)
 
 
 @router.get("/recent/list")

@@ -51,5 +51,7 @@ def test_postprocess_adds_sales_ready_payload_fields():
     assert pp["deal_guidance"]["when_we_lose"]
     assert pp["how_to_beat"]
     assert pp["talk_track"]
+    assert pp["objection_handling"]
+    assert pp["summary"]["confidence_explanation"]
     assert pp["talk_track"][0]["claim"].startswith('"')
     assert len(pp["how_to_beat"][0]["claim"].split()) <= 19
