@@ -25,12 +25,22 @@ logger = get_logger(__name__)
 
 def _search_result_sources(competitor_name: str, canonical_domain: str | None, discovered: list[dict[str, str]]) -> list[dict[str, Any]]:
     sources = []
-    for item in discovered[:10]:
+    ranked_discovery = sorted(
+        discovered,
+        key=lambda item: score_source(
+            str(item.get("url", "")),
+            canonical_domain,
+            str(item.get("title", "")),
+            source_type=str(item.get("source_type", "external")),
+        ),
+        reverse=True,
+    )
+    for item in ranked_discovery[:10]:
         url = item.get("url", "")
         title = item.get("title", url)
         if not url:
             continue
-        source_type = "official" if canonical_domain and canonical_domain in url else "external"
+        source_type = str(item.get("source_type") or ("official" if canonical_domain and canonical_domain in url else "external"))
         sources.append(
             {
                 "url": url,
@@ -114,10 +124,26 @@ class PipelineService:
                 add_event(run_id, "resolving_domain", "Live Call draft is ready from search signals.", 18)
 
             update_run(run_id, status="crawling")
-            live_limit = min(len(discovered), 4)
-            full_limit = live_limit
+            live_limit = min(len(discovered), 6)
+            full_limit = min(len(discovered), 14)
+            live_sources = discovered[:live_limit]
+            remaining_sources = discovered[live_limit:full_limit]
+            
             add_event(run_id, "crawling", f"Crawling {live_limit} priority pages for Live Call Mode.", 25)
-            live_crawled = await crawl_sources(discovered, limit=live_limit)
+            if remaining_sources:
+                add_event(run_id, "crawling", f"Crawling {len(remaining_sources)} more pages for Deep Research (in parallel).", 26)
+            
+            # Parallelize crawling of live and remaining sources
+            if remaining_sources:
+                live_crawled, remaining_crawled = await asyncio.gather(
+                    crawl_sources(live_sources, limit=live_limit),
+                    crawl_sources(remaining_sources, limit=len(remaining_sources))
+                )
+                crawled = live_crawled + remaining_crawled
+            else:
+                live_crawled = await crawl_sources(live_sources, limit=live_limit)
+                crawled = live_crawled
+            
             if not live_crawled:
                 raise RuntimeError("Unable to crawl sources")
 
@@ -137,11 +163,6 @@ class PipelineService:
                 snippets_json=__import__("json").dumps(live_snippets),
             )
             add_event(run_id, "extracting", "Live Call Mode is ready; continuing deep research.", 55)
-
-            remaining = discovered[live_limit:full_limit]
-            add_event(run_id, "crawling", f"Crawling {len(remaining)} more pages for Deep Research.", 62)
-            remaining_crawled = await crawl_sources(remaining, limit=len(remaining)) if remaining else []
-            crawled = live_crawled + remaining_crawled
 
             add_event(run_id, "extracting", "Extracting and ranking full research evidence.", 68)
             ranked = rank_and_dedupe_sources(canonical_domain, discovered, crawled)

@@ -18,6 +18,7 @@ SECTIONS = [
     "strengths",
     "weaknesses_risks",
     "customer_sentiment",
+    "customer_reviews",
     "sales_talk_track_objection_handling",
 ]
 
@@ -30,6 +31,7 @@ def extract_snippets(ranked_sources: list[dict[str, Any]]) -> list[dict[str, Any
         "strengths": ["fast", "secure", "scalable", "growth", "trusted"],
         "weaknesses_risks": ["risk", "challenge", "complaint", "issue", "regulatory"],
         "customer_sentiment": ["review", "rating", "feedback", "customer", "experience"],
+        "customer_reviews": ["review", "reviews", "rating", "ratings", "testimonial", "trustpilot", "g2", "capterra", "reddit", "complaint"],
         "competitor_overview": ["company", "founded", "offers", "serves", "market"],
         "sales_talk_track_objection_handling": ["alternative", "why", "switch", "compare"],
     }
@@ -154,7 +156,7 @@ def _fallback_json(
             grouped[section].append(sn)
 
     def build_bullets(section: str) -> list[dict[str, Any]]:
-        picks = grouped.get(section, [])[:4]
+        picks = grouped.get(section, [])[:8]
         if not picks:
             return [{"claim": "Not enough public data found.", "citations": []}]
         return [
@@ -220,6 +222,8 @@ def _groq_json(
             "talk_track": "single conversational quote per item",
             "how_to_beat": "direct, aggressive, under 18 words per bullet",
             "prioritize": ["weaknesses_risks", "deal_guidance", "how_to_beat", "talk_track"],
+            "min_items_per_section": 5,
+            "max_items_per_section": 8,
         },
         "output_schema": {
             "competitor_name": "string",
@@ -291,14 +295,14 @@ def generate_live_call_payload(
     payload = _fallback_json(competitor_name, snippets, sources, signals)
     payload["grounding"] = "live_call_fast_path"
     payload["partial"] = True
-    return post_process_payload(payload, max_bullets=3, max_words_per_bullet=18)
+    return post_process_payload(payload, max_bullets=5, max_words_per_bullet=500)
 
 
 def _weakness_claim(signal: dict[str, Any]) -> str:
     label = str(signal.get("label", "execution risk"))
     evidence = _first_signal_text(signal)
     if evidence and evidence != label:
-        return _clip_sentence(f"{label.title()} pain: {evidence}", 18)
+        return f"{label.title()} pain: {evidence}"
     return f"{label.title()} is a pressure point worth attacking."
 
 
@@ -640,6 +644,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "strengths": "Strengths",
         "weaknesses_risks": "Weaknesses / risks",
         "customer_sentiment": "Customer sentiment",
+        "customer_reviews": "Customer reviews",
         "sales_talk_track_objection_handling": "Sales talk track / objection handling",
     }
 

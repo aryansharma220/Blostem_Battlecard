@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     dedupe_similarity_threshold: float = 0.82
     dedupe_limit: int = 60
     post_max_bullets: int = 5
-    post_max_words_per_bullet: int = 20
+    post_max_words_per_bullet: int = 500
 
     groq_api_key: str = ""
     groq_model: str = ""

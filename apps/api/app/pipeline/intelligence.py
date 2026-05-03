@@ -89,7 +89,7 @@ def _signal_angle(category: str, text: str, source_type: str) -> str | None:
 def extract_competitive_signals(
     snippets: list[dict[str, Any]],
     sources: list[dict[str, Any]],
-    limit: int = 10,
+    limit: int = 20,
 ) -> list[dict[str, Any]]:
     """Classify and score reusable competitive signals from grounded snippets."""
     source_by_url = _source_lookup(sources)

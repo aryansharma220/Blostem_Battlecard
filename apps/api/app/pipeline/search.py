@@ -10,6 +10,57 @@ from app.utils.logging import get_logger
 logger = get_logger(__name__)
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+SOURCE_QUERY_GROUPS: list[tuple[str, list[str]]] = [
+    (
+        "news",
+        [
+            "{name} news",
+            "{name} press release",
+            "{name} announcement funding",
+        ],
+    ),
+    (
+        "reviews",
+        [
+            "{name} reviews",
+            "{name} complaints",
+            "{name} trustpilot g2 capterra reddit",
+        ],
+    ),
+    (
+        "filings",
+        [
+            "site:sec.gov {name}",
+            "{name} annual report investor relations",
+            '"{name}" 10-k filing',
+        ],
+    ),
+    (
+        "community",
+        [
+            "{name} reddit discussion",
+            "{name} forum discussion",
+            "{name} user feedback",
+        ],
+    ),
+    (
+        "comparison",
+        [
+            "{name} alternative compare",
+            "{name} vs competitors",
+            "{name} pricing compare",
+        ],
+    ),
+    (
+        "official",
+        [
+            "{name} official site",
+            "{name} pricing docs",
+            "{name} product docs",
+        ],
+    ),
+]
+
 
 def _unwrap_ddg_url(url: str) -> str:
     parsed = urlparse(url)
@@ -20,7 +71,7 @@ def _unwrap_ddg_url(url: str) -> str:
     return url
 
 
-async def search_duckduckgo(query: str, max_results: int = 8) -> list[dict[str, str]]:
+async def search_duckduckgo(query: str, max_results: int = 8, source_type: str = "external") -> list[dict[str, str]]:
     endpoint = "https://duckduckgo.com/html/"
     params = {"q": query}
     headers = {"User-Agent": USER_AGENT}
@@ -46,7 +97,7 @@ async def search_duckduckgo(query: str, max_results: int = 8) -> list[dict[str, 
         title = a.get_text(" ", strip=True)
         snippet_node = node.select_one(".result__snippet")
         snippet = snippet_node.get_text(" ", strip=True) if snippet_node else ""
-        results.append({"url": clean_url, "title": title, "snippet": snippet})
+        results.append({"url": clean_url, "title": title, "snippet": snippet, "source_type": source_type})
         if len(results) >= max_results:
             break
 
@@ -54,13 +105,12 @@ async def search_duckduckgo(query: str, max_results: int = 8) -> list[dict[str, 
 
 
 async def discover_sources(competitor_name: str) -> list[dict[str, str]]:
-    queries = [
-        f"{competitor_name} official site",
-        f"{competitor_name} pricing",
-        f"{competitor_name} customer reviews complaints",
-        f"{competitor_name} alternative compare",
-    ]
-    batches = await asyncio.gather(*[search_duckduckgo(q) for q in queries])
+    queries: list[tuple[str, str]] = []
+    for source_type, templates in SOURCE_QUERY_GROUPS:
+        for template in templates:
+            queries.append((source_type, template.format(name=competitor_name)))
+
+    batches = await asyncio.gather(*[search_duckduckgo(query, max_results=6, source_type=source_type) for source_type, query in queries])
 
     dedup: dict[str, dict[str, str]] = {}
     for batch in batches:

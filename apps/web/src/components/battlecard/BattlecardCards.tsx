@@ -121,7 +121,7 @@ function CitationBadges({
             </button>
             <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-72 rounded-md border border-slate-200 bg-white p-2 text-[11px] text-slate-700 shadow-lg group-hover:block">
               <div className="font-semibold text-slate-900">S{index} · {String(sourceByUrl.get(url)?.source.title ?? "Source")}</div>
-              <div className="mt-1 line-clamp-3 text-slate-600">{trimSentence(hoverDetail, 24)}</div>
+              <div className="mt-1 whitespace-normal break-words text-slate-600">{hoverDetail}</div>
             </div>
           </div>
         );
@@ -181,7 +181,7 @@ function KeyInsight({ summary }: { summary?: Summary }) {
   return (
     <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-4">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-900">Key insight</p>
-      <p className="mt-1 truncate text-[21px] font-medium leading-8 text-slate-950" title={insight}>
+      <p className="mt-1 whitespace-normal text-[21px] font-medium leading-8 text-slate-950" title={insight}>
         <strong>{compact.lead}</strong>
         {compact.tail ? <span className="font-medium"> {compact.tail}</span> : null}
       </p>
@@ -202,6 +202,7 @@ function buildDisplayPayload(payload: any, sources: SourceItem[]) {
   const weaknesses = usefulItems(sections.weaknesses_risks, 3);
   const strengths = usefulItems(sections.strengths, 3);
   const pricing = usefulItems(sections.pricing_posture, 2);
+  const customerReviews = usefulItems(sections.customer_reviews, 3);
   const talk = usefulItems(sections.sales_talk_track_objection_handling, 3);
 
   const fallbackHowToBeat = weaknesses.length
@@ -272,6 +273,7 @@ function buildDisplayPayload(payload: any, sources: SourceItem[]) {
       when_we_win: fallbackWin.slice(0, 3),
       when_we_lose: fallbackLose,
     },
+    customerReviews: customerReviews.length ? customerReviews : usefulItems(sections.customer_sentiment, 2),
   };
 }
 
@@ -400,8 +402,8 @@ function DealGuidance({
   onOpenSource: (url: string) => void;
   compact?: boolean;
 }) {
-  const wins = (guidance?.when_we_win ?? []).map((item) => ({ ...item, claim: trimSentence(String(item.claim ?? ""), 8) }));
-  const losses = (guidance?.when_we_lose ?? []).map((item) => ({ ...item, claim: trimSentence(String(item.claim ?? ""), 8) }));
+  const wins = guidance?.when_we_win ?? [];
+  const losses = guidance?.when_we_lose ?? [];
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5">
@@ -423,6 +425,7 @@ const SECTION_STYLES: Record<string, { shell: string; accent: string; eyebrow: s
   pricing_posture: { shell: "border-amber-200 bg-amber-50/80", accent: "text-amber-800", eyebrow: "Commercial" },
   recent_launches_announcements: { shell: "border-violet-200 bg-violet-50/80", accent: "text-violet-700", eyebrow: "Momentum" },
   customer_sentiment: { shell: "border-slate-200 bg-slate-50/80", accent: "text-slate-700", eyebrow: "Voice of customer" },
+  customer_reviews: { shell: "border-emerald-200 bg-emerald-50/80", accent: "text-emerald-700", eyebrow: "Social proof" },
   sales_talk_track_objection_handling: { shell: "border-indigo-200 bg-indigo-50/80", accent: "text-indigo-700", eyebrow: "Objections" },
 };
 
@@ -491,6 +494,7 @@ function DeepResearchAccordion({
     "strengths",
     "pricing_posture",
     "customer_sentiment",
+    "customer_reviews",
     "sales_talk_track_objection_handling",
   ];
 
@@ -557,7 +561,7 @@ function SourcesDrawer({ sources, openSourceUrl }: { sources: SourceItem[]; open
                   <span>S{idx + 1} - {title}</span>
                   <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                 </div>
-                <div className="mt-1 truncate text-xs text-slate-500">{url}</div>
+                <div className="mt-1 break-all text-xs text-slate-500">{url}</div>
               </a>
             );
           })
@@ -634,6 +638,7 @@ export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) 
     pricing_posture: "Pricing posture",
     recent_launches_announcements: "Recent launches / announcements",
     customer_sentiment: "Customer sentiment",
+    customer_reviews: "Customer reviews",
     sales_talk_track_objection_handling: "Objection handling",
   };
 
@@ -707,6 +712,19 @@ export function BattlecardCards({ payload }: { payload?: any; events?: any[] }) 
               compact={liveMode}
             />
             <DealGuidance guidance={display.dealGuidance} sourceIndexByUrl={sourceIndexByUrl} sourceByUrl={sourceByUrl} onOpenSource={setOpenSourceUrl} compact={liveMode} />
+            {(display.customerReviews as SectionItem[]).length ? (
+              <ActionList
+                title="Customer Reviews"
+                eyebrow="Social proof"
+                topLabel="BUYER VOICE"
+                items={display.customerReviews as SectionItem[]}
+                sourceIndexByUrl={sourceIndexByUrl}
+                sourceByUrl={sourceByUrl}
+                onOpenSource={setOpenSourceUrl}
+                tone="emerald"
+                compact={liveMode}
+              />
+            ) : null}
           </div>
         </div>
 

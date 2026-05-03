@@ -52,7 +52,7 @@ export function RecentRuns({
               >
                 <div className="flex items-start gap-2">
                   <button type="button" onClick={() => onSelect(id)} className="min-w-0 flex-1 text-left">
-                    <div className="truncate text-sm font-medium text-slate-800">{competitor}</div>
+                    <div className="min-w-0 break-words text-sm font-medium text-slate-800">{competitor}</div>
                     <div className="mt-0.5 text-xs uppercase tracking-wide text-slate-500">{status}</div>
                     <div className="mt-1 text-[11px] text-slate-400">{formatUpdatedAt(run.updated_at)}</div>
                   </button>

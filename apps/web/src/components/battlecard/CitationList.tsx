@@ -20,7 +20,7 @@ export function CitationList({ sources }: { sources: Array<Record<string, unknow
                 className="block rounded-lg border border-slate-100 p-2 text-sm hover:bg-slate-50"
               >
                 <div className="font-medium text-slate-800">S{idx + 1} - {title}</div>
-                <div className="truncate text-xs text-slate-500">{url}</div>
+                <div className="mt-1 break-all text-xs text-slate-500">{url}</div>
               </a>
             );
           })
